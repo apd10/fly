@@ -32,7 +32,7 @@ class Perplexity(Metric):
 
     def __init__(self, compute_on_step=True, dist_sync_on_step=False, process_group=None, dist_sync_fn=None):
         super().__init__(
-            compute_on_step=compute_on_step,
+            #compute_on_step=compute_on_step,
             dist_sync_on_step=dist_sync_on_step,
             process_group=process_group,
             dist_sync_fn=dist_sync_fn,

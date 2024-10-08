@@ -128,10 +128,58 @@ class GPT2Attention(nn.Module):
             self.c_attn = Conv1D(3 * self.embed_dim, self.hidden_size)
         self.c_proj = Conv1D(self.hidden_size, self.embed_dim)
 
+        self.add_lth = config.add_lth
+        self.lth_int_dim = 128
+        self.lth_final_dim = 24
+        self.lth_bit_thold = 0.1
+        self.lth_intended_top_k = 10
+
+        self.learning_to_hash_transformation_k = nn.Sequential(
+            nn.Linear(self.hidden_size, self.lth_int_dim),
+            nn.SiLU(),
+            nn.Linear(self.lth_int_dim, self.lth_int_dim),
+            nn.SiLU(),
+            nn.Linear(self.lth_int_dim, self.num_heads * self.lth_final_dim)
+        )
+        self.learning_to_hash_transformation_q = nn.Sequential(
+            nn.Linear(self.hidden_size, self.lth_int_dim),
+            nn.SiLU(),
+            nn.Linear(self.lth_int_dim, self.lth_int_dim),
+            nn.SiLU(),
+            nn.Linear(self.lth_int_dim, self.num_heads * self.lth_final_dim)
+        )
+
         self.attn_dropout = nn.Dropout(config.attn_pdrop)
         self.resid_dropout = nn.Dropout(config.resid_pdrop)
 
         self.pruned_heads = set()
+
+    def give_lth_score(self, hidden_states):
+        import pdb
+        pdb.set_trace()
+        Q = self.learning_to_hash_transformation_q(hidden_states)
+        K = self.learning_to_hash_transformation_k(hidden_states)
+        Q = nn.functional.tanh(Q)
+        K = nn.functional.tanh(K)
+        Q = self._split_heads(Q, self.num_heads, self.lth_final_dim)
+        K = self._split_heads(K, self.num_heads, self.lth_final_dim)
+        bsz, _, q_seq_len, _ = Q.size()
+        _, _, k_seq_len, _ = K.size()
+
+        q = rearrange(Q, 'b h t d -> (b h) t d')
+        k = rearrange(K, 'b h s d -> (b h) d s')
+        # Preallocate attn_weights for `baddbmm`
+        span_scores = torch.empty(bsz * self.num_heads, q_seq_len, k_seq_len, dtype=Q.dtype,
+                                   device=Q.device)
+
+        span_scores = rearrange(torch.baddbmm(span_scores, q, k, beta=0, alpha=1.0),
+                                 '(b h) t s -> b h t s', h=self.num_heads)
+        span_scores = torch.sigmoid(span_scores - self.lth_final_dim * self.lth_bit_thold)
+        span_scores = span_scores / torch.sum(span_scores, dim=-1, keepdim=True)
+
+        span_scores = torch.clip(self.lth_intended_top_k * span_scores, max=1.0)
+        return span_scores
+
 
     def prune_heads(self, heads):
         if len(heads) == 0:
@@ -183,7 +231,6 @@ class GPT2Attention(nn.Module):
                 attn_weights = attn_weights + attention_mask
             # Downcast (if necessary) back to V's dtype (if in mixed-precision)
             attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=value.dtype)
-
         attn_weights = self.attn_dropout(attn_weights)
 
         # Mask heads if we want to
@@ -274,6 +321,8 @@ class GPT2Attention(nn.Module):
         use_cache=False,
         output_attentions=False,
     ):
+        import pdb
+        pdb.set_trace()
         if encoder_hidden_states is not None:
             if not hasattr(self, "q_attn"):
                 raise ValueError(
@@ -300,14 +349,14 @@ class GPT2Attention(nn.Module):
             present = (key, value)
         else:
             present = None
-
+        span_scores = self.give_lth_score(hidden_states)
         if self.use_rotary_emb:
             query, key = self.rotary_emb(query, key)
         if self.reorder_and_upcast_attn:
             attn_output, attn_weights = self._upcast_and_reordered_attn(query, key, value, attention_mask, head_mask)
         else:
             attn_output, attn_weights = self._attn(query, key, value, attention_mask, head_mask)
-
+        
         attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
         attn_output = self.c_proj(attn_output)
         attn_output = self.resid_dropout(attn_output)
