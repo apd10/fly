@@ -29,7 +29,7 @@ def load_checkpoint(path, device='cpu'):
     # T2T-ViT checkpoint is nested in the key 'state_dict_ema'
     if state_dict.keys() == {'state_dict_ema'}:
         state_dict = state_dict['state_dict_ema']
-    return state_dict
+    return state_dict['module']
 
 
 def evaluate(config: DictConfig) -> None:
@@ -56,9 +56,10 @@ def evaluate(config: DictConfig) -> None:
     else:
         trained_model: LightningModule = hydra.utils.instantiate(config.task, cfg=config,
                                                                  _recursive_=False)
-        load_return = trained_model.model.load_state_dict(load_checkpoint(config.eval.ckpt,
+        load_return = trained_model.load_state_dict(load_checkpoint(config.eval.ckpt,
                                                                           device=trained_model.device),
                                                           strict=False)
+
         log.info(load_return)
 
     # datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)

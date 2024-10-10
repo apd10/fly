@@ -5,3 +5,4 @@ config:
   # However, reorder_and_upcast_attn slows things down
   reorder_and_upcast_attn: false
   scale_attn_by_inverse_layer_idx: true
+  add_lth: False
