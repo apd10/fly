@@ -1,3 +1,4 @@
+import torch
 from typing import List, Optional
 from pathlib import Path
 
@@ -16,6 +17,18 @@ from src.utils import utils
 
 log = utils.get_logger(__name__)
 
+
+def load_checkpoint(path, device='cpu'):
+    path = Path(path).expanduser()
+    if path.is_dir():
+        path /= 'checkpoint_last.pt'
+    # dst = f'cuda:{torch.cuda.current_device()}'
+    log.info(f'Loading checkpoint from {str(path)}')
+    state_dict = torch.load(path, map_location=device)
+    # T2T-ViT checkpoint is nested in the key 'state_dict_ema'
+    if state_dict.keys() == {'state_dict_ema'}:
+        state_dict = state_dict['state_dict_ema']
+    return state_dict['module']
 
 def train(config: DictConfig) -> Optional[float]:
     """Contains training pipeline.
@@ -55,16 +68,9 @@ def train(config: DictConfig) -> Optional[float]:
                 logger.append(hydra.utils.instantiate(lg_conf))
 
     if config.get('resume'):
-        try:
-            checkpoint_path = Path(config.callbacks.model_checkpoint.dirpath)
-            if checkpoint_path.is_dir():
-                checkpoint_path /= 'last.ckpt'
-            if checkpoint_path.is_file():
-                config.trainer.resume_from_checkpoint = str(checkpoint_path)
-            else:
-                log.info(f'Checkpoint file {str(checkpoint_path)} not found. Will start training from scratch')
-        except KeyError:
-            pass
+        load_return = model.load_state_dict(load_checkpoint(config.resume.ckpt,
+                                                                          device=model.device),
+                                                          strict=False)
     # Init lightning trainer
     log.info(f"Instantiating trainer <{config.trainer._target_}>")
     trainer: Trainer = hydra.utils.instantiate(
