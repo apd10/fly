@@ -30,6 +30,7 @@ def main(config: DictConfig):
     # Read more here: https://github.com/facebookresearch/hydra/issues/934
     from src.train import train
     from src.eval import evaluate
+    from src.gen import generate
     from src.utils import utils
 
     # A couple of optional utilities:
@@ -45,12 +46,14 @@ def main(config: DictConfig):
 
     # Train model
     mode = config.get('mode', 'train')
-    if mode not in ['train', 'eval']:
+    if mode not in ['train', 'eval', 'gen']:
         raise NotImplementedError(f'mode {mode} not supported')
     if mode == 'train':
         return train(config)
     elif mode == 'eval':
         return evaluate(config)
+    elif mode == 'gen':
+        return generate(config)
 
 
 if __name__ == "__main__":
